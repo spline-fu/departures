@@ -73,17 +73,17 @@ func main() {
 
 	// set default id if empty
 	if *id == "" {
-		fmt.Println("station ID is empty. Defaulting to: 900000100003")
-		*id = "900000100003"
+		fmt.Println("station ID is empty. Defaulting to: 900051353")
+		*id = "900051353"
 	}
 
 	// set the color mode
 	color.NoColor = color.NoColor && !*forceColor
 
 	// request the departures
-	var deps []result
-	for i := 0; i < *retries+1; i++ {
-		err = getJSON(&deps, "https://v5.vbb.transport.rest/stops/%s/departures?duration=%d", *id, *min)
+	var result result
+	for i := 0; i < *retries+3; i++ {
+		err = getJSON(&result, "https://v6.vbb.transport.rest/stops/%s/departures?duration=%d", *id, *min)
 		if err == nil {
 			break
 		}
@@ -104,8 +104,8 @@ func main() {
 	var lenName, lenDir, lenDep, lenRem int
 	from := time.Now().Add(-2 * time.Minute)
 	until := time.Now().Add(time.Hour)
-	filteredDeps := deps[:0] // no need to waste space
-	for _, dep := range deps {
+	filteredDeps := result.Departures[:0] // no need to waste space
+	for _, dep := range result.Departures {
 		if dep.When.Before(from) || dep.When.After(until) {
 			continue
 		}
@@ -197,7 +197,7 @@ func main() {
 
 func searchStations(name string) ([]station, error) {
 	var stations []station
-	err := getJSON(&stations, "https://v5.vbb.transport.rest/locations?query=%s&poi=false&addresses=false", name)
+	err := getJSON(&stations, "https://v6.vbb.transport.rest/locations?query=%s&poi=false&addresses=false", name)
 
 	return stations, err
 }
@@ -253,55 +253,49 @@ func getJSON(v interface{}, urlFormat string, values ...interface{}) error {
 }
 
 type result struct {
-	TripID string `json:"tripId"`
-	Stop   struct {
-		Type     string `json:"type"`
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Location struct {
-			Type      string  `json:"type"`
-			ID        string  `json:"id"`
-			Latitude  float64 `json:"latitude"`
-			Longitude float64 `json:"longitude"`
-		} `json:"location"`
-		Products struct {
-			Suburban bool `json:"suburban"`
-			Subway   bool `json:"subway"`
-			Tram     bool `json:"tram"`
-			Bus      bool `json:"bus"`
-			Ferry    bool `json:"ferry"`
-			Express  bool `json:"express"`
-			Regional bool `json:"regional"`
-		} `json:"products"`
-	} `json:"stop"`
-	When      time.Time `json:"when"`
-	Direction string    `json:"direction"`
-	Line      struct {
-		Type     string `json:"type"`
-		ID       string `json:"id"`
-		FahrtNr  string `json:"fahrtNr"`
-		Name     string `json:"name"`
-		Public   bool   `json:"public"`
-		Mode     string `json:"mode"`
-		Product  string `json:"product"`
-		Operator struct {
+	Departures            []departure `json:"departures"`
+	RealtimeDataUpdatedAt int         `json:"realtimeDataUpdatedAt"`
+}
+
+type departure struct {
+	TripID          string    `json:"tripId"`
+	Stop            station   `json:"stop"`
+	When            time.Time `json:"when"`
+	PlannedWhen     time.Time `json:"plannedWhen"`
+	Delay           int       `json:"delay"`
+	Platform        string    `json:"platform"`
+	PlannedPlatform string    `json:"plannedPlatform"`
+	PrognosisType   string    `json:"prognosisType"`
+	Direction       string    `json:"direction"`
+	Provenance      string    `json:"provenance"`
+	Line            struct {
+		Type        string `json:"type"`
+		ID          string `json:"id"`
+		FahrtNr     string `json:"fahrtNr"`
+		Name        string `json:"name"`
+		Public      bool   `json:"public"`
+		AdminCode   string `json:"adminCode"`
+		ProductName string `json:"productName"`
+		Mode        string `json:"mode"`
+		Product     string `json:"product"`
+		Operator    struct {
 			Type string `json:"type"`
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		} `json:"operator"`
-		Symbol  string `json:"symbol"`
-		Nr      int    `json:"nr"`
-		Metro   bool   `json:"metro"`
-		Express bool   `json:"express"`
-		Night   bool   `json:"night"`
 	} `json:"line"`
 	Remarks []struct {
 		Type string `json:"type"`
 		Code string `json:"code"`
 		Text string `json:"text"`
 	} `json:"remarks"`
-	Delay    int    `json:"delay"`
-	Platform string `json:"platform"`
+	Origin               station `json:"origin"`
+	Destination          station `json:"destination"`
+	CurrentTripPoisition struct {
+		Type      string  `json:"type"`
+		Latidude  float64 `json:"latidude"`
+		Longitude float64 `json:"longitude"`
+	} `json:"currentTripPoisition"`
 }
 
 type station struct {
@@ -343,7 +337,7 @@ func rightPad(s string, l int) string {
 	return string(r) + strings.Repeat(" ", l-len(r))
 }
 
-func departureTime(r result) string {
+func departureTime(r departure) string {
 	if r.Delay == 0 {
 		return r.When.Format("15:04")
 	}
@@ -388,7 +382,7 @@ func intEnv(key string) int {
 	return i
 }
 
-func filterBike(r result) bool {
+func filterBike(r departure) bool {
 	for _, rem := range r.Remarks {
 		if strings.TrimSpace(rem.Code) == "FB" {
 			return false
